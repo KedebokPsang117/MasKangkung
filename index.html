@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Dimensi Tarik - Hand Tracking</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#0a0a0f;color:white;font-family:system-ui,-apple-system,Segoe UI,Roboto;overflow:hidden;touch-action:none}
+  #c{position:fixed;inset:0;width:100vw;height:100vh;display:block}
+  #video{position:fixed;right:12px;bottom:12px;width:120px;height:90px;object-fit:cover;border-radius:12px;transform:scaleX(-1);border:2px solid rgba(255,255,255,0.2);z-index:10}
+  #ui{position:fixed;left:0;top:0;right:0;z-index:20;padding:16px;pointer-events:none}
+  .card{background:rgba(20,20,30,0.7);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.12);border-radius:16px;padding:14px 16px;max-width:380px;pointer-events:auto}
+  h1{font-size:18px;letter-spacing:0.5px;margin-bottom:6px}
+  p{font-size:13px;opacity:0.8;line-height:1.4}
+  #status{margin-top:10px;font-size:12px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,0.08);display:flex;gap:8px;align-items:center}
+  .dot{width:8px;height:8px;border-radius:50%;background:#ff5a5a;box-shadow:0 0 8px currentColor}
+  .dot.ok{background:#5aff8a}
+  .dot.grab{background:#5ac8ff;animation:pulse 0.8s infinite}
+  @keyframes pulse{0%{transform:scale(1)}50%{transform:scale(1.5)}100%{transform:scale(1)}}
+  #startBtn{margin-top:12px;width:100%;padding:12px;border-radius:12px;border:0;background:white;color:black;font-weight:700;font-size:14px;cursor:pointer}
+  #hint{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:20;background:rgba(0,0,0,0.6);backdrop-filter:blur(12px);padding:8px 14px;border-radius:999px;font-size:12px;letter-spacing:0.3px;white-space:nowrap}
+  #depthBar{position:fixed;left:16px;top:50%;transform:translateY(-50%);z-index:15;width:4px;height:200px;background:rgba(255,255,255,0.1);border-radius:999px;overflow:hidden}
+  #depthFill{width:100%;height:50%;background:linear-gradient(to top,#5ac8ff,#a78bfa);transition:height 0.1s linear}
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<video id="video" autoplay playsinline muted></video>
+<div id="depthBar"><div id="depthFill"></div></div>
+<div id="ui">
+  <div class="card">
+    <h1>DIMENSI TARIK</h1>
+    <p>Cubit jempol + telunjuk untuk grab balok. Maju-mundur tangan = balok membesar/mengecil kayak narik dimensi.</p>
+    <div id="status"><div id="dot" class="dot"></div><span id="statusText">Kamera belum aktif</span></div>
+    <button id="startBtn">Aktifkan Kamera & Mulai</button>
+  </div>
+</div>
+<div id="hint">👌 Cubit untuk tarik • ✋ Lepas untuk lepas</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { HandLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm/vision_bundle.mjs';
+
+// --- Three.js setup ---
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x0a0a0f, 6, 14);
+scene.background = new THREE.Color(0x0a0a0f);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 100);
+camera.position.set(0,1.2,4);
+
+const ambient = new THREE.AmbientLight(0xffffff,0.6);
+scene.add(ambient);
+const dir = new THREE.DirectionalLight(0xffffff,1.2);
+dir.position.set(2,4,3);
+dir.castShadow = true;
+dir.shadow.mapSize.set(1024,1024);
+scene.add(dir);
+const fill = new THREE.PointLight(0x8b5cff,0.8,10);
+fill.position.set(-2,2,-2);
+scene.add(fill);
+
+// ground
+const groundGeo = new THREE.PlaneGeometry(20,20);
+const groundMat = new THREE.MeshStandardMaterial({color:0x151520, roughness:0.9, metalness:0.1});
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI/2;
+ground.position.y = -1;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// grid helper
+const grid = new THREE.GridHelper(20,20,0x222233,0x151520);
+grid.position.y = -0.99;
+scene.add(grid);
+
+// balok dimensi
+const boxGeo = new THREE.BoxGeometry(1,1,1, 4,4,4);
+const boxMat = new THREE.MeshStandardMaterial({
+  color:0x7dd3fc,
+  emissive:0x0ea5e9,
+  emissiveIntensity:0.25,
+  roughness:0.3,
+  metalness:0.2,
+  transparent:true,
+  opacity:1
+});
+const cube = new THREE.Mesh(boxGeo, boxMat);
+cube.castShadow = true;
+cube.position.set(0,0.2,0);
+scene.add(cube);
+
+// inner glow core for portal hint
+const coreGeo = new THREE.IcosahedronGeometry(0.35,2);
+const coreMat = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0});
+const core = new THREE.Mesh(coreGeo, coreMat);
+cube.add(core);
+
+// particles ring
+const ringGeo = new THREE.TorusGeometry(0.8,0.02,8,40);
+const ringMat = new THREE.MeshBasicMaterial({color:0x5ac8ff, transparent:true, opacity:0.6});
+const ring = new THREE.Mesh(ringGeo, ringMat);
+ring.rotation.x = Math.PI/2;
+ring.position.y = -0.9;
+scene.add(ring);
+
+let targetScale = 1;
+let targetZ = 0;
+let currentGrab = false;
+
+// --- Hand tracking ---
+const video = document.getElementById('video');
+const dot = document.getElementById('dot');
+const statusText = document.getElementById('statusText');
+const startBtn = document.getElementById('startBtn');
+const depthFill = document.getElementById('depthFill');
+
+let handLandmarker;
+let lastVideoTime = -1;
+let isGrabbing = false;
+let grabStartHandSize = 1;
+let grabStartScale = 1;
+let grabStartZ = 0;
+let smoothPinch = 0;
+
+function dist(a,b){
+  return Math.hypot(a.x-b.x, a.y-b.y, (a.z||0)-(b.z||0));
+}
+
+async function initHand(){
+  const fileset = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  handLandmarker = await HandLandmarker.createFromOptions(fileset, {
+    baseOptions:{
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate:"GPU"
+    },
+    numHands:1,
+    runningMode:"VIDEO",
+    minHandDetectionConfidence:0.6,
+    minHandPresenceConfidence:0.6,
+    minTrackingConfidence:0.6
+  });
+}
+
+async function startCamera(){
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"user", width:{ideal:640}, height:{ideal:480}}});
+    video.srcObject = stream;
+    await new Promise(r=>video.onloadeddata=r);
+    statusText.textContent = "Kamera aktif, cari tangan...";
+    dot.className = "dot ok";
+    startBtn.style.display="none";
+    requestAnimationFrame(loop);
+  }catch(e){
+    statusText.textContent = "Gagal kamera: "+e.message;
+    alert("Butuh izin kamera. Buka di HTTPS (GitHub Pages sudah HTTPS).");
+  }
+}
+
+function loop(){
+  if(video.currentTime !== lastVideoTime){
+    lastVideoTime = video.currentTime;
+    const result = handLandmarker.detectForVideo(video, Date.now());
+    handleHands(result);
+  }
+  requestAnimationFrame(loop);
+}
+
+function handleHands(result){
+  if(!result.landmarks || result.landmarks.length===0){
+    statusText.textContent = "Tangan tidak terlihat - arahkan tangan ke kamera";
+    dot.className = "dot";
+    isGrabbing = false;
+    currentGrab = false;
+    return;
+  }
+  const lm = result.landmarks[0];
+  const thumbTip = lm[4];
+  const indexTip = lm[8];
+  const wrist = lm[0];
+  const middleTip = lm[12];
+  const middleMcp = lm[9];
+
+  const pinchDist = dist(thumbTip, indexTip);
+  const handSize = dist(wrist, middleTip); // proxy untuk jarak tangan ke kamera
+  
+  // smoothing
+  smoothPinch = smoothPinch*0.7 + pinchDist*0.3;
+  
+  const PINCH_THRESHOLD = 0.05;
+  const grabbingNow = smoothPinch < PINCH_THRESHOLD;
+
+  if(grabbingNow && !isGrabbing){
+    // mulai grab
+    isGrabbing = true;
+    grabStartHandSize = handSize;
+    grabStartScale = targetScale;
+    grabStartZ = targetZ;
+    if(navigator.vibrate) navigator.vibrate(40);
+    statusText.textContent = "TER-GRAB! Tarik maju/mundur";
+    dot.className = "dot grab";
+    currentGrab = true;
+  } else if(!grabbingNow && isGrabbing){
+    isGrabbing = false;
+    statusText.textContent = "Lepas - cubit lagi untuk tarik";
+    dot.className = "dot ok";
+    currentGrab = false;
+  }
+
+  if(isGrabbing){
+    const ratio = handSize / (grabStartHandSize || 0.1);
+    // ratio >1 = tangan membesar = dekat kamera = balok membesar mendekat
+    let newScale = grabStartScale * ratio;
+    newScale = Math.min(3, Math.max(0.25, newScale));
+    targetScale = newScale;
+
+    let newZ = grabStartZ + (ratio -1)*3.5;
+    newZ = Math.min(2.5, Math.max(-3.5, newZ));
+    targetZ = newZ;
+
+    // depth bar
+    const pct = ((newScale -0.25)/ (3-0.25))*100;
+    depthFill.style.height = pct+"%";
+
+    statusText.textContent = `Menarik: ${newScale.toFixed(2)}x | Z:${newZ.toFixed(2)}`;
+  } else {
+    // idle tracking: update hint size slight
+    const idleScale = 0.8 + handSize*1.5;
+    depthFill.style.height = (Math.min(100, idleScale*30))+"%";
+  }
+}
+
+// render loop three
+function animate(){
+  requestAnimationFrame(animate);
+  // smooth
+  cube.scale.lerp(new THREE.Vector3(targetScale,targetScale,targetScale),0.12);
+  cube.position.z += (targetZ - cube.position.z)*0.12;
+  cube.position.y = 0.2 + Math.sin(Date.now()*0.001)*0.05;
+  cube.rotation.y += 0.005;
+  if(currentGrab) cube.rotation.x += 0.01;
+
+  // portal effect when far
+  if(targetScale < 0.55){
+    const t = 1 - targetScale/0.55;
+    boxMat.opacity = 1 - t*0.6;
+    boxMat.emissiveIntensity = 0.25 + t*1.2;
+    coreMat.opacity = t*0.9;
+    ringMat.opacity = 0.2 + t*0.8;
+    ring.scale.setScalar(0.8 + t*1.5);
+    scene.background = new THREE.Color().setHSL(0.65+t*0.15,0.7,0.06+t*0.04);
+  }else{
+    boxMat.opacity += (1-boxMat.opacity)*0.1;
+    boxMat.emissiveIntensity += (0.25-boxMat.emissiveIntensity)*0.1;
+    coreMat.opacity += (0-coreMat.opacity)*0.1;
+    ringMat.opacity += (0.6-ringMat.opacity)*0.1;
+    ring.scale.lerp(new THREE.Vector3(1,1,1),0.1);
+    scene.background.lerp(new THREE.Color(0x0a0a0f),0.08);
+  }
+
+  renderer.render(scene,camera);
+}
+animate();
+
+window.addEventListener('resize',()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+startBtn.onclick = async ()=>{
+  startBtn.textContent = "Loading AI...";
+  if(!handLandmarker) await initHand();
+  await startCamera();
+};
+
+(async()=>{
+  try{ await initHand(); statusText.textContent="AI siap, klik Aktifkan Kamera"; }catch(e){ statusText.textContent="Gagal load AI, cek koneksi"; console.error(e); }
+})();
+</script>
+</body>
+</html>
