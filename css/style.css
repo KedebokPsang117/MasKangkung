@@ -1,1 +1,27 @@
-
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto;overflow:hidden;touch-action:none}
+#c{position:fixed;inset:0;width:100vw;height:100vh;display:block}
+#video{position:fixed;right:12px;bottom:12px;width:132px;height:99px;object-fit:cover;border-radius:14px;transform:scaleX(-1);border:2px solid rgba(255,255,255,0.18);z-index:10;background:#111}
+#video.active{border-color:#5aff8a;box-shadow:0 0 12px rgba(90,255,138,0.5)}
+#ui{position:fixed;left:0;top:0;right:0;z-index:20;padding:14px;pointer-events:none}
+.card{background:rgba(20,20,30,0.78);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.12);border-radius:18px;padding:14px 16px;max-width:400px;pointer-events:auto}
+h1{font-size:18px;letter-spacing:0.6px;margin-bottom:6px}
+p{font-size:13px;opacity:0.82;line-height:1.45}
+#status{margin-top:10px;font-size:12px;padding:9px 11px;border-radius:11px;background:rgba(255,255,255,0.08);display:flex;gap:8px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;background:#ff5a5a;box-shadow:0 0 8px currentColor;flex-shrink:0}
+.dot.ok{background:#5aff8a}
+.dot.grab{background:#5ac8ff;animation:pulse .8s infinite}
+.dot.load{background:#ffd85a;animation:pulse .8s infinite}
+@keyframes pulse{0%{transform:scale(1)}50%{transform:scale(1.5)}100%{transform:scale(1)}}
+.btn{margin-top:12px;width:100%;padding:13px;border-radius:12px;border:0;font-weight:800;font-size:14px;cursor:pointer;transition:transform .1s}
+.btn:active{transform:scale(0.98)}
+#startBtn{background:#fff;color:#000}
+#startBtn:disabled{opacity:0.5;cursor:not-allowed}
+#debugBtn{background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.2);margin-top:8px;font-size:12px;padding:8px}
+#hint{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:20;background:rgba(0,0,0,0.6);backdrop-filter:blur(12px);padding:8px 14px;border-radius:999px;font-size:12px;white-space:nowrap}
+#depthBar{position:fixed;left:16px;top:50%;transform:translateY(-50%);z-index:15;width:4px;height:200px;background:rgba(255,255,255,0.1);border-radius:999px;overflow:hidden}
+#depthFill{width:100%;height:45%;background:linear-gradient(to top,#5ac8ff,#a78bfa);transition:height .12s linear}
+#debugLog{position:fixed;left:12px;right:12px;bottom:58px;z-index:30;max-height:38vh;overflow:auto;background:rgba(0,0,0,0.85);border:1px solid rgba(255,255,255,0.15);border-radius:12px;padding:10px;font-family:monospace;font-size:11px;line-height:1.4;display:none}
+#debugLog b{color:#5ac8ff}
+#debugLog .err{color:#ff7a7a}
+#debugLog .ok{color:#5aff8a}
