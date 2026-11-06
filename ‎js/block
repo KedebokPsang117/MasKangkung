@@ -1,0 +1,246 @@
+/**
+ * block.js - Balok Dimensi: bentuk, scale, directional stretch, snap-back
+ */
+
+const DimensionalBlock = {
+    mesh: null,
+    edgesMesh: null,
+    innerMesh: null,
+    
+    // State
+    isVisible: false,
+    isGrabbed: false,
+    isFloating: false,
+    
+    // Properties
+    baseSize: 10,           // 10cm virtual (dalam unit Three.js)
+    currentScale: 1.0,      // 1.0 = 10cm
+    minScale: 0.2,          // 2cm
+    maxScale: 5.0,          // 50cm
+    
+    // Directional stretch
+    stretchVector: new THREE.Vector3(1, 1, 1),
+    stretchIntensity: 0,
+    maxStretch: 3.0,
+    
+    // Position & rotation
+    position: new THREE.Vector3(),
+    rotation: new THREE.Euler(),
+    
+    // Snap-back physics
+    snapBackSpeed: 0.15,
+    isSnappingBack: false,
+    
+    // Float state (setelah fusion release)
+    floatVelocity: new THREE.Vector3(),
+    floatTarget: null,
+    
+    init(scene) {
+        // Create block group
+        const group = new THREE.Group();
+        
+        // Main body - semi-transparent crystal
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        const material = new THREE.MeshPhysicalMaterial({
+            color: 0x00d4ff,
+            transparent: true,
+            opacity: 0.3,
+            roughness: 0.1,
+            metalness: 0.2,
+            clearcoat: 1.0,
+            clearcoatRoughness: 0.1,
+            side: THREE.DoubleSide
+        });
+        this.mesh = new THREE.Mesh(geometry, material);
+        group.add(this.mesh);
+        
+        // Edge glow
+        const edgesGeometry = new THREE.EdgesGeometry(geometry);
+        const edgesMaterial = new THREE.LineBasicMaterial({
+            color: 0x00ffff,
+            transparent: true,
+            opacity: 0.8,
+            linewidth: 2
+        });
+        this.edgesMesh = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+        group.add(this.edgesMesh);
+        
+        // Inner distortion effect (simple rotating inner cube)
+        const innerGeometry = new THREE.BoxGeometry(0.6, 0.6, 0.6);
+        const innerMaterial = new THREE.MeshBasicMaterial({
+            color: 0x8800ff,
+            transparent: true,
+            opacity: 0.15,
+            wireframe: true
+        });
+        this.innerMesh = new THREE.Mesh(innerGeometry, innerMaterial);
+        group.add(this.innerMesh);
+        
+        group.visible = false;
+        scene.add(group);
+        this.group = group;
+        
+        return group;
+    },
+    
+    spawn(position) {
+        this.position.copy(position);
+        this.group.position.copy(position);
+        this.isVisible = true;
+        this.isFloating = false;
+        this.group.visible = true;
+        this.currentScale = 1.0;
+        this.stretchVector.set(1, 1, 1);
+        this.stretchIntensity = 0;
+        this.updateScale();
+    },
+    
+    despawn() {
+        this.isVisible = false;
+        this.isGrabbed = false;
+        this.isFloating = false;
+        this.group.visible = false;
+    },
+    
+    update(handTracker, deltaTime) {
+        if (!this.isVisible) return;
+        
+        // Inner rotation animation
+        if (this.innerMesh) {
+            this.innerMesh.rotation.x += deltaTime * 0.5;
+            this.innerMesh.rotation.y += deltaTime * 0.3;
+        }
+        
+        if (this.isSnappingBack) {
+            this.updateSnapBack();
+        }
+        
+        if (this.isFloating) {
+            this.updateFloat(deltaTime);
+        }
+        
+        // Update edge glow based on stretch
+        if (this.edgesMesh) {
+            const intensity = 0.5 + this.stretchIntensity * 0.5;
+            this.edgesMesh.material.opacity = Math.min(1, intensity);
+            
+            if (handTracker.isTensionMode()) {
+                this.edgesMesh.material.color.setHex(0xffd700); // Gold saat tension
+            } else {
+                this.edgesMesh.material.color.setHex(0x00ffff);
+            }
+        }
+    },
+    
+    setScale(scaleValue) {
+        // scaleValue dari jarak jempol-tengah (0-1 normalized)
+        // Map ke range minScale - maxScale
+        this.currentScale = this.minScale + scaleValue * (this.maxScale - this.minScale);
+        this.updateScale();
+    },
+    
+    setDirectionalStretch(direction, intensity) {
+        // direction: Vector3 arah tarikan
+        // intensity: 0-1 seberapa kuat tarikan
+        this.stretchVector.copy(direction);
+        this.stretchIntensity = Math.min(intensity, this.maxStretch);
+        this.updateScale();
+    },
+    
+    updateScale() {
+        if (!this.group) return;
+        
+        const s = this.currentScale * this.baseSize;
+        
+        // Apply directional stretch
+        const sx = s * (1 + this.stretchVector.x * this.stretchIntensity);
+        const sy = s * (1 + this.stretchVector.y * this.stretchIntensity);
+        const sz = s * (1 + this.stretchVector.z * this.stretchIntensity);
+        
+        this.group.scale.set(sx, sy, sz);
+    },
+    
+    setRotation(euler) {
+        this.rotation.copy(euler);
+        this.group.rotation.copy(euler);
+    },
+    
+    // Snap-back ke bentuk asal saat dilepas
+    startSnapBack() {
+        this.isSnappingBack = true;
+        this.isGrabbed = false;
+    },
+    
+    updateSnapBack() {
+        // Lerp stretch back to 1,1,1
+        this.stretchVector.lerp(new THREE.Vector3(1, 1, 1), this.snapBackSpeed);
+        this.stretchIntensity *= (1 - this.snapBackSpeed);
+        
+        if (this.stretchIntensity < 0.01) {
+            this.stretchIntensity = 0;
+            this.stretchVector.set(1, 1, 1);
+            this.isSnappingBack = false;
+        }
+        
+        this.updateScale();
+    },
+    
+    // Float mode (setelah fusion release)
+    startFloat() {
+        this.isFloating = true;
+        this.isGrabbed = false;
+        this.floatVelocity.set(0, 0, 0);
+    },
+    
+    updateFloat(deltaTime) {
+        // Gentle floating animation
+        const time = Date.now() * 0.001;
+        this.group.position.y += Math.sin(time * 2) * 0.02;
+        
+        // Kalau ada target (tangan muncul lagi), move towards it
+        if (this.floatTarget) {
+            const direction = new THREE.Vector3()
+                .subVectors(this.floatTarget, this.group.position);
+            const distance = direction.length();
+            
+            if (distance < 2) {
+                // Sampai di tangan, kembali grabbed
+                this.isFloating = false;
+                this.isGrabbed = true;
+                this.floatTarget = null;
+            } else {
+                direction.normalize();
+                this.group.position.add(direction.multiplyScalar(deltaTime * 5));
+            }
+        }
+    },
+    
+    setFloatTarget(position) {
+        this.floatTarget = position.clone();
+    },
+    
+    // Get 5 sudut balok untuk attachment benang
+    getCorners() {
+        const s = this.group.scale;
+        const p = this.group.position;
+        const halfX = s.x / 2;
+        const halfY = s.y / 2;
+        const halfZ = s.z / 2;
+        
+        // 5 titik attachment (bukan 8 sudut, tapi 5 titik untuk 5 jari)
+        return [
+            new THREE.Vector3(p.x - halfX, p.y - halfY, p.z),          // Thumb - kiri bawah
+            new THREE.Vector3(p.x + halfX, p.y + halfY, p.z + halfZ),   // Index - kanan atas depan
+            new THREE.Vector3(p.x, p.y + halfY, p.z - halfZ),           // Middle - tengah atas belakang
+            new THREE.Vector3(p.x + halfX, p.y - halfY, p.z - halfZ),   // Ring - kanan bawah belakang
+            new THREE.Vector3(p.x - halfX, p.y + halfY, p.z - halfZ)    // Pinky - kiri atas belakang
+        ];
+    },
+    
+    getState() {
+        if (this.isFloating) return "Mengambang";
+        if (this.isGrabbed) return "Digenggam";
+        if (this.isVisible) return "Aktif";
+        return "-";
+    }
+};
