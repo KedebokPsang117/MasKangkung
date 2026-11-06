@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Dimensi Tarik - AR Hand-Tracked Block</title>
+    <link rel="stylesheet" href="css/style.css">
+    
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+</head>
+<body>
+    <div id="container">
+        <video id="camera-feed" autoplay playsinline></video>
+        <canvas id="overlay-canvas"></canvas>
+        
+        <div id="loading" class="overlay-message">
+            <div class="spinner"></div>
+            <p>Memuat Dimensi Tarik...</p>
+        </div>
+        
+        <div id="warning" class="overlay-message hidden">
+            <p id="warning-text"></p>
+        </div>
+        
+        <div id="status-bar">
+            <span id="fps-counter">FPS: --</span>
+            <span id="mode-indicator">Mode: Normal</span>
+            <span id="block-state">Balok: -</span>
+        </div>
+    </div>
+    
+    <script src="js/hand.js"></script>
+    <script src="js/threads.js"></script>
+    <script src="js/block.js"></script>
+    <script src="js/fusion.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
